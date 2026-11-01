@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Isometric Dubai</title>
+  <meta name="description" content="An interactive, hand-coded isometric map of Dubai with a live day/night cycle.">
+  <meta name="theme-color" content="#0e1a2b">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <canvas id="map" aria-label="Isometric map of Dubai"></canvas>
+  <!-- UI agent owns everything inside #ui -->
+  <div id="ui">
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+        <symbol id="i-tour" viewBox="0 0 24 24"><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="6" r="2"/><path d="M7.5 18h7a3 3 0 0 0 0-6h-5a3 3 0 0 1 0-6h7"/></symbol>
+        <symbol id="i-save" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 15l4.5-4 4 3.5 3-2.5 5 4"/><circle cx="15.5" cy="9" r="1.4"/></symbol>
+        <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l8.5 4.25L12 12.5 3.5 8.25z"/><path d="M3.5 12.25L12 16.5l8.5-4.25"/><path d="M3.5 16.25L12 20.5l8.5-4.25"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".6" fill="currentColor"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+        <symbol id="i-reset" viewBox="0 0 24 24"><path d="M12 3.5l7.5 3.75v9.5L12 20.5l-7.5-3.75v-9.5z"/><path d="M12 12l7.5-4.75M12 12v8.5M12 12L4.5 7.25"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+        <symbol id="i-fly" viewBox="0 0 24 24"><path d="M3.5 11.5l17-7-6.5 16-3-6.5z"/><path d="M11 14l9.5-9.5"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5z"/></symbol>
+        <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6l8 6-8 6z"/><path d="M18 6v12"/></symbol>
+        <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6l-8 6 8 6z"/><path d="M6 6v12"/></symbol>
+        <symbol id="i-postcard" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M13 9.5h5M13 12h5M13 14.5h3"/><path d="M5.5 15l2.5-2.5 2 2"/></symbol>
+        <symbol id="i-poster" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M8.5 13l2.5-2.5 2 2 1.5-1.5 1.5 1.5"/><path d="M8.5 17h7"/></symbol>
+      </defs>
+    </svg>
+
+    <header class="brand" id="brand">
+      <h1 class="brand-lockup">
+        <span class="brand-en">Isometric Dubai</span>
+        <span class="brand-ar" lang="ar" dir="rtl">دبي الأيزومترية</span>
+      </h1>
+      <p class="brand-sub" data-i18n="subtitle">Dubai, drawn entirely in code and lit by its own sun.</p>
+      <button type="button" class="link-btn" id="about-open" data-i18n="about">About this map</button>
+    </header>
+
+    <div class="topbar" id="topbar">
+      <div class="search" id="search" role="search">
+        <svg class="ico search-ico" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="search-input" type="text" role="combobox" aria-expanded="false" aria-controls="search-results"
+          aria-autocomplete="list" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"
+          data-i18n-attr="placeholder:searchPh;aria-label:search" placeholder="Search places, districts, metro" aria-label="Search">
+        <kbd class="search-kbd" aria-hidden="true">⌘K</kbd>
+        <ul id="search-results" role="listbox" hidden data-i18n-attr="aria-label:search"></ul>
+      </div>
+      <button type="button" class="icon-btn glass only-phone" id="search-toggle" data-i18n-attr="aria-label:search" aria-label="Search"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></button>
+      <nav class="tools glass" id="tools" data-i18n-attr="aria-label:menu" aria-label="Menu">
+        <button type="button" class="tool tool-tour" id="tour-btn" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-tour"/></svg><span data-i18n="tour">Tour</span></button>
+        <button type="button" class="tool" id="save-btn" aria-haspopup="true" aria-expanded="false" aria-controls="save-panel" data-i18n-attr="title:save"><svg class="ico" aria-hidden="true"><use href="#i-save"/></svg><span class="tool-label" data-i18n="save">Save image</span></button>
+        <button type="button" class="tool" id="layers-btn" aria-haspopup="true" aria-expanded="false" aria-controls="layers-panel" data-i18n-attr="title:layers"><svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg><span class="tool-label" data-i18n="layers">Layers</span></button>
+        <button type="button" class="tool tool-lang" id="lang-btn" data-i18n-attr="aria-label:languageLabel;title:languageLabel"><span class="lang-glyph" data-i18n="language">العربية</span></button>
+        <button type="button" class="tool" id="about-btn" data-i18n-attr="title:about"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg><span class="tool-label" data-i18n="about">About this map</span></button>
+      </nav>
+      <button type="button" class="icon-btn glass only-phone" id="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="tools" data-i18n-attr="aria-label:menu" aria-label="Menu"><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    </div>
+
+    <div class="pop glass" id="save-panel" hidden role="group" data-i18n-attr="aria-label:save">
+      <p class="pop-title" data-i18n="save">Save image</p>
+      <button type="button" class="pop-row" data-export="postcard"><svg class="ico" aria-hidden="true"><use href="#i-postcard"/></svg><span><b data-i18n="postcard">Postcard</b><small data-i18n="postcardHint">Framed, 2400 px</small></span></button>
+      <button type="button" class="pop-row" data-export="poster"><svg class="ico" aria-hidden="true"><use href="#i-poster"/></svg><span><b data-i18n="poster">Poster</b><small data-i18n="posterHint">Portrait, 3000 px wide</small></span></button>
+    </div>
+    <div class="pop glass" id="layers-panel" hidden role="group" data-i18n-attr="aria-label:layers">
+      <p class="pop-title" data-i18n="layers">Layers</p>
+      <div id="layers-list"></div>
+    </div>
+
+    <section class="card glass" id="card" hidden aria-live="polite"></section>
+
+    <section class="time glass" id="time" data-i18n-attr="aria-label:timeOfDay" aria-label="Time of day">
+      <div class="time-top">
+        <svg class="dial" viewBox="0 0 132 66" aria-hidden="true">
+          <defs>
+            <linearGradient id="sky-grad" x1="0" y1="0" x2="0" y2="1"><stop id="sky-top" offset="0" stop-color="#5a96d2"/><stop id="sky-bot" offset="1" stop-color="#c8e1f0"/></linearGradient>
+            <clipPath id="dome-clip"><path d="M4 58 A62 56 0 0 1 128 58 L128 66 L4 66Z"/></clipPath>
+            <radialGradient id="sun-glow"><stop offset="0" stop-color="#ffd58a" stop-opacity=".85"/><stop offset="1" stop-color="#ffd58a" stop-opacity="0"/></radialGradient>
+          </defs>
+          <g clip-path="url(#dome-clip)">
+            <rect x="0" y="0" width="132" height="66" fill="url(#sky-grad)"/>
+            <g id="dial-stars" fill="#fff">
+              <circle cx="30" cy="30" r=".7"/><circle cx="48" cy="16" r=".9"/><circle cx="82" cy="12" r=".6"/><circle cx="100" cy="28" r=".8"/>
+              <circle cx="64" cy="26" r=".5"/><circle cx="20" cy="46" r=".6"/><circle cx="112" cy="44" r=".5"/><circle cx="74" cy="38" r=".6"/>
+            </g>
+            <path class="dial-path" d="M16 58 A50 44 0 0 1 116 58" fill="none"/>
+            <g id="dial-moon"><circle r="5" fill="#e7ecfb"/><circle r="4.4" cx="2.6" cy="-1.6" fill="#7c8bb8" opacity=".55"/></g>
+            <g id="dial-sun"><circle class="sun-glow" r="13" fill="url(#sun-glow)"/><circle r="5.2" fill="#ffcf6e"/><circle r="5.2" fill="none" stroke="#fff3d0" stroke-width=".8"/></g>
+            <rect id="dial-ground" x="0" y="58" width="132" height="8" fill="#d8bd8a"/>
+            <path d="M0 58.5H132" stroke="rgba(40,28,14,.35)" stroke-width=".8"/>
+          </g>
+          <path class="dial-rim" d="M4 58 A62 56 0 0 1 128 58" fill="none"/>
+        </svg>
+        <div class="clock">
+          <div class="clock-time" id="clock-time">12:00</div>
+          <div class="clock-sub"><span class="live-dot" aria-hidden="true"></span><span id="clock-phase">Midday</span><span class="clock-zone" data-i18n="dubaiTime">Dubai time</span></div>
+        </div>
+        <div class="time-modes">
+          <div class="seg" role="radiogroup" data-i18n-attr="aria-label:timeMode" aria-label="Time mode">
+            <button type="button" role="radio" data-mode="live" aria-checked="true" data-i18n="live">Live</button>
+            <button type="button" role="radio" data-mode="manual" aria-checked="false" data-i18n="manual">Manual</button>
+            <button type="button" role="radio" data-mode="cycle" aria-checked="false" data-i18n="cycle">Cycle</button>
+          </div>
+          <button type="button" class="speed" id="speed" hidden>10 min/s</button>
+        </div>
+      </div>
+      <div class="track-wrap" dir="ltr">
+        <div class="track-pins" id="track-pins"></div>
+        <div class="track" id="track" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="24" aria-valuenow="12" data-i18n-attr="aria-label:timeOfDay" aria-label="Time of day">
+          <div class="track-bar"></div>
+          <div class="track-thumb" id="track-thumb"></div>
+        </div>
+        <div class="track-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+      </div>
+    </section>
+
+    <div class="tour-caption glass" id="tour-caption" hidden aria-live="polite"></div>
+
+    <div class="minimap glass" id="minimap">
+      <canvas id="minimap-canvas" data-i18n-attr="aria-label:minimap" aria-label="Overview map. Click or drag to move." role="img"></canvas>
+      <div class="map-meta">
+        <div class="scale" aria-hidden="true"><i id="scale-bar"></i><span id="scale-text">1 km</span></div>
+        <div class="north" id="north" data-i18n-attr="title:north" title="North" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path class="n-head" d="M12 2.5l3.2 9.5H8.8z"/><path class="n-tail" d="M12 21.5L8.8 12h6.4z"/></svg>
+          <b>N</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="zoom glass" role="group" aria-label="Zoom">
+      <button type="button" class="icon-btn" id="zoom-in" data-i18n-attr="aria-label:zoomIn;title:zoomIn" aria-label="Zoom in"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>
+      <button type="button" class="icon-btn" id="zoom-out" data-i18n-attr="aria-label:zoomOut;title:zoomOut" aria-label="Zoom out"><svg class="ico" aria-hidden="true"><use href="#i-minus"/></svg></button>
+      <button type="button" class="icon-btn" id="zoom-reset" data-i18n-attr="aria-label:reset;title:reset" aria-label="Reset view"><svg class="ico" aria-hidden="true"><use href="#i-reset"/></svg></button>
+    </div>
+
+    <div class="tip" id="tip" aria-hidden="true"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <pre class="debug" id="debug" hidden></pre>
+
+    <dialog class="about glass" id="about" aria-labelledby="about-title">
+      <div class="about-inner">
+        <header class="about-head">
+          <div class="brand-lockup about-lockup"><span class="brand-en">Isometric Dubai</span><span class="brand-ar" lang="ar" dir="rtl">دبي الأيزومترية</span></div>
+          <button type="button" class="icon-btn about-close" data-i18n-attr="aria-label:close" aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+        </header>
+        <h2 class="visually-hidden" id="about-title" data-i18n="aboutTitle">About Isometric Dubai</h2>
+        <h3 data-i18n="aboutHow">How it is made</h3>
+        <p data-i18n="aboutHowBody"></p>
+        <p data-i18n="aboutPrivacy"></p>
+        <h3 data-i18n="aboutNote">A note on accuracy</h3>
+        <p class="about-note" data-i18n="aboutNoteBody"></p>
+        <h3 data-i18n="aboutControls">Controls</h3>
+        <dl class="controls" id="controls-list"></dl>
+        <h3 data-i18n="aboutCredits">Credits</h3>
+        <p data-i18n="aboutCreditsBody"></p>
+      </div>
+    </dialog>
+  </div>
+  <div id="loader"><div class="loader-title">Isometric Dubai</div><div id="loader-status">Loading…</div></div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
