@@ -38,9 +38,9 @@ shows *Live · N aircraft* plus the data credit, or *Simulated* when the feed is
 
 Notes: altitudes above 2 km are compressed for display (cruise traffic would otherwise be drawn far from its ground
 track in this projection). Coverage depends on volunteer receivers. adsb.lol data is ODbL (attribution shown in the
-UI); adsb.fi open data is for personal, non-commercial use. Review provider terms before any public deployment. A
-static host (e.g. GitHub Pages) has no relay, so deploy `flights-relay.mjs`'s logic as a serverless function on the
-same origin if you want live planes there.
+UI); adsb.fi open data is for personal, non-commercial use. Review provider terms before any public deployment. On
+Vercel, `api/flights.mjs` runs the same relay as a serverless function (CDN-cached for 4 s, so all instances share
+one upstream request). A pure static host (e.g. GitHub Pages) has no relay and shows simulated planes.
 
 ## Verify / screenshot (headless Chrome)
 

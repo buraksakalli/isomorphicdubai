@@ -93,14 +93,19 @@ async function snapshot() {
   return inflight;
 }
 
-/** Returns true if the request was handled (path matched). */
-export function handleFlights(req, res) {
+/**
+ * Returns true if the request was handled (path matched).
+ * opts.cdn: also let a CDN (Vercel) cache successful answers for a few seconds, so serverless instances share one
+ * upstream request per window instead of each keeping its own in-memory cache. Browsers still get no-store.
+ */
+export function handleFlights(req, res, opts = {}) {
   const path = new URL(req.url, 'http://x').pathname;
   if (path !== '/api/flights') return false;
   const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+  const okHeaders = opts.cdn ? { ...headers, 'vercel-cdn-cache-control': 'max-age=4, stale-while-revalidate=10' } : headers;
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...headers, allow: 'GET, HEAD' }); res.end('{"error":"method not allowed"}'); return true; }
   snapshot().then(
-    (body) => { res.writeHead(200, headers); res.end(req.method === 'HEAD' ? undefined : body); },
+    (body) => { res.writeHead(200, okHeaders); res.end(req.method === 'HEAD' ? undefined : body); },
     (e) => {
       console.error('[flights] upstream unavailable:', e && e.message);
       // a slightly stale snapshot beats nothing; beyond a minute, report unavailable
