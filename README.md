@@ -31,16 +31,19 @@ relay, planes fall back to the built-in simulation.
 
 Planes are real aircraft when `/api/flights` is available. `tools/flights-relay.mjs` fetches public ADS-B positions
 around Dubai from [adsb.lol](https://adsb.lol) (fallback: [adsb.fi](https://adsb.fi)), validates and trims them to
-callsign / type / position / altitude / speed / track, and caches one snapshot per 5 s for all viewers. A relay is
-needed because these APIs send no CORS headers. The browser polls every 5 s (paused in background tabs and when the
-Planes layer is off), dead-reckons each aircraft between updates and eases out the corrections. The Layers panel
+callsign / type / position / altitude / speed / track / turn rate, and caches one snapshot per 10 s for all viewers.
+A relay is needed because these APIs send no CORS headers, so browsers cannot call them directly. The browser polls
+every 15 s while the visitor is active and every 60 s after 5 minutes without input; it stops in background tabs and
+when the Planes layer is off. Between updates each aircraft is extrapolated along its turn rate and corrections are
+eased out. Click a plane for its details (callsign, operator, type, altitude, speed, heading, climb/descent); *Follow*
+keeps it centred. The Layers panel
 shows *Live · N aircraft* plus the data credit, or *Simulated* when the feed is unavailable or stale (> 45 s).
 
 Notes: altitudes above 2 km are compressed for display (cruise traffic would otherwise be drawn far from its ground
 track in this projection). Coverage depends on volunteer receivers. adsb.lol data is ODbL (attribution shown in the
 UI); adsb.fi open data is for personal, non-commercial use. Review provider terms before any public deployment. On
-Vercel, `api/flights.mjs` runs the same relay as a serverless function (CDN-cached for 4 s, so all instances share
-one upstream request). A pure static host (e.g. GitHub Pages) has no relay and shows simulated planes.
+Vercel, `api/flights.mjs` runs the same relay as a serverless function (CDN-cached for 10 s, so all instances share
+one upstream request per window). A pure static host (e.g. GitHub Pages) has no relay and shows simulated planes.
 
 ## Verify / screenshot (headless Chrome)
 

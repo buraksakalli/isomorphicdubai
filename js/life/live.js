@@ -1,15 +1,21 @@
 // Live aircraft feed: polls the same-origin relay (/api/flights, see tools/flights-relay.mjs) and keeps a smoothed,
-// dead-reckoned track per aircraft so planes glide between the ~5 s position updates instead of jumping.
+// dead-reckoned track per aircraft so planes glide between position updates instead of jumping.
 // If the relay is absent (plain static hosting) or the feed goes stale, `live` is false and planes.js falls back to
 // its simulation. Time base is the real wall clock (positions are real), not app.clock, which may be time-lapsed.
+//
+// Request budget (the relay runs on a free serverless plan): one poll every 15 s while the visitor is active, every
+// 60 s after 5 minutes without input, none while the tab is hidden or the Planes layer is off. To stay accurate
+// between sparse updates, aircraft are extrapolated along their current turn rate (arc), not a straight line.
 
-const POLL_MS = 5000;
-const STALE_S = 45;           // feed considered down if no good snapshot for this long
-const DROP_S = 40;            // forget an aircraft this long after its last position fix
-const MAX_EXTRAP_S = 25;      // never dead-reckon further than this past a fix
-const BLEND_S = 1.6;          // time constant for easing out the jump when a new fix arrives
+const POLL_ACTIVE_MS = 15000;
+const POLL_IDLE_MS = 60000;
+const IDLE_AFTER_MS = 5 * 60000;
+const MAX_EXTRAP_S = 75;      // never dead-reckon further than this past a fix
+const MAX_TURN = Math.PI / 2; // extrapolate at most a quarter turn, then continue straight
+const MAX_RATE = 5;           // deg/s clamp on turn rate
+const BLEND_S = 2.2;          // time constant for easing out the jump when a new fix arrives
 const FADE_S = 2.5;
-const GONE_S = 12;            // missing from snapshots this long → fade out (tolerates one or two dropped polls)
+const DEG = Math.PI / 180;
 
 export function createLiveFeed(app, { url = '/api/flights' } = {}) {
   const g = app.geo;
@@ -17,57 +23,33 @@ export function createLiveFeed(app, { url = '/api/flights' } = {}) {
   const st = { state: 'idle', count: 0, source: '', licence: '', updated: 0, error: '' };
   let skew = 0;               // server clock − local clock (s)
   let timer = 0, wanted = false, busy = false, fails = 0, lastGood = 0;
+  let lastInput = Date.now(), interval = POLL_ACTIVE_MS;
 
   const nowS = () => Date.now() / 1000 + skew;
+  // all freshness thresholds scale with the current poll interval
+  const staleS = () => (3 * interval) / 1000 + 15;       // feed considered down
+  const goneS = () => (2.2 * interval) / 1000;           // missing from snapshots this long → fade out
+  const dropS = () => Math.min(MAX_EXTRAP_S + 10, (2.5 * interval) / 1000 + 20); // since last fix → forget
 
-  function project(a) {
-    const [x, y] = g.toWorld(a.lat, a.lon);
-    const th = ((a.trk ?? 0) * Math.PI) / 180;
-    // world x = east, y = south; track is clockwise from north
-    return { x, y, z: a.alt, vx: (Math.sin(th) * a.gs) / 100, vy: (-Math.cos(th) * a.gs) / 100, vz: a.vr };
-  }
-
-  // predicted (un-smoothed) position of a track at time t
+  // predicted (un-smoothed) position + track angle of a track at time t
   function predict(tr, t, out) {
     const dt = Math.max(0, Math.min(MAX_EXTRAP_S, t - tr.tf));
-    out.x = tr.fx + tr.vx * dt; out.y = tr.fy + tr.vy * dt;
-    out.z = tr.gnd ? 0 : Math.max(0, tr.fz + tr.vz * dt);
+    const v = tr.gs / 100, th0 = tr.th;     // tiles/s, radians clockwise from north
+    let x = tr.fx, y = tr.fy, th = th0;
+    const w = tr.w;
+    if (Math.abs(w) > 1e-4 && v > 0) {
+      const ta = Math.min(dt, MAX_TURN / Math.abs(w));
+      th = th0 + w * ta;
+      // integral of (v sinθ, −v cosθ) with θ = θ0 + ωt   (x east, y south)
+      x += (v / w) * (Math.cos(th0) - Math.cos(th));
+      y -= (v / w) * (Math.sin(th) - Math.sin(th0));
+      const rest = dt - ta;
+      x += Math.sin(th) * v * rest; y -= Math.cos(th) * v * rest;
+    } else { x += Math.sin(th0) * v * dt; y -= Math.cos(th0) * v * dt; }
+    out.x = x; out.y = y; out.th = th;
+    out.z = tr.gnd ? 0 : Math.max(0, tr.fz + tr.vr * Math.min(dt, 30));
     return out;
   }
-
-  const tmp = { x: 0, y: 0, z: 0 };
-  function ingest(d) {
-    const recv = Date.now() / 1000;
-    if (typeof d.now === 'number') skew = d.now / 1000 - recv;
-    const t = nowS();
-    const seen = new Set();
-    for (const a of d.ac) {
-      if (!a || !a.id) continue;
-      seen.add(a.id);
-      const p = project(a);
-      const tf = d.now / 1000 - (a.age || 0);
-      let tr = tracks.get(a.id);
-      if (tr && tf <= tr.tf) continue; // no newer fix
-      if (!tr) {
-        tr = { id: a.id, born: t, cx: 0, cy: 0, cz: 0, ct: t, hdg: null, gone: 0 };
-        tracks.set(a.id, tr);
-      } else {
-        // carry the currently displayed position into a decaying correction, so the plane eases onto the new track
-        const disp = display(tr, t, { x: 0, y: 0, z: 0 });
-        tr.fx = p.x; tr.fy = p.y; tr.fz = p.z; tr.vx = p.vx; tr.vy = p.vy; tr.vz = p.vz; tr.tf = tf; tr.gnd = a.gnd;
-        predict(tr, t, tmp);
-        tr.cx = disp.x - tmp.x; tr.cy = disp.y - tmp.y; tr.cz = disp.z - tmp.z; tr.ct = t;
-        if (Math.hypot(tr.cx, tr.cy) > 30) { tr.cx = tr.cy = tr.cz = 0; } // >3 km: a real jump, don't animate it
-      }
-      tr.fx = p.x; tr.fy = p.y; tr.fz = p.z; tr.vx = p.vx; tr.vy = p.vy; tr.vz = p.vz; tr.tf = tf; tr.gnd = a.gnd;
-      tr.cs = a.cs || ''; tr.t = a.t || ''; tr.cat = a.cat || ''; tr.gs = a.gs; tr.alt = a.alt;
-      tr.trk = a.trk; tr.gone = 0;
-    }
-    for (const tr of tracks.values()) if (!seen.has(tr.id) && !tr.gone) tr.gone = t;
-    st.count = d.ac.length; st.source = d.source || ''; st.licence = d.licence || ''; st.updated = recv;
-    lastGood = recv;
-  }
-
   function display(tr, t, out) {
     predict(tr, t, out);
     const k = Math.exp(-(t - tr.ct) / BLEND_S);
@@ -75,10 +57,49 @@ export function createLiveFeed(app, { url = '/api/flights' } = {}) {
     return out;
   }
 
+  const tmp = { x: 0, y: 0, z: 0, th: 0 }, disp = { x: 0, y: 0, z: 0, th: 0 };
+  function ingest(d, ageHdr) {
+    const recv = Date.now() / 1000;
+    // a CDN may hand out a snapshot that is a few seconds old: `now` + the Age header = server time at delivery
+    if (typeof d.now === 'number') skew = d.now / 1000 + ageHdr - recv;
+    const t = nowS();
+    const seen = new Set();
+    for (const a of d.ac) {
+      if (!a || !a.id) continue;
+      seen.add(a.id);
+      const [x, y] = g.toWorld(a.lat, a.lon);
+      const tf = d.now / 1000 - (a.age || 0);
+      let tr = tracks.get(a.id);
+      if (tr && tf <= tr.tf) { tr.gone = 0; continue; } // no newer fix
+      const th = (a.trk ?? 0) * DEG;
+      // turn rate: from the feed if given, else from the change in track since the previous fix
+      let w = typeof a.tr === 'number' ? a.tr * DEG : 0;
+      if (typeof a.tr !== 'number' && tr && a.trk != null && tr.trk != null && tf - tr.tf > 1 && tf - tr.tf < 120) {
+        let dth = th - tr.th; dth = Math.atan2(Math.sin(dth), Math.cos(dth));
+        w = dth / (tf - tr.tf);
+      }
+      w = Math.max(-MAX_RATE * DEG, Math.min(MAX_RATE * DEG, w));
+      if (a.gnd) w = 0;
+      if (tr) display(tr, t, disp);
+      if (!tr) { tr = { id: a.id, born: t, cx: 0, cy: 0, cz: 0, ct: t, hdg: null, gone: 0 }; tracks.set(a.id, tr); }
+      Object.assign(tr, { fx: x, fy: y, fz: a.alt, tf, th, w, gs: a.gs || 0, vr: a.vr || 0, gnd: !!a.gnd,
+        cs: a.cs || '', t: a.t || '', cat: a.cat || '', alt: a.alt, trk: a.trk, gone: 0 });
+      if (tr.born !== t) {
+        // carry the currently displayed position into a decaying correction, so the plane eases onto the new track
+        predict(tr, t, tmp);
+        tr.cx = disp.x - tmp.x; tr.cy = disp.y - tmp.y; tr.cz = disp.z - tmp.z; tr.ct = t;
+        if (Math.hypot(tr.cx, tr.cy) > 30) tr.cx = tr.cy = tr.cz = 0; // >3 km: a real jump, don't animate it
+      }
+    }
+    for (const tr of tracks.values()) if (!seen.has(tr.id) && !tr.gone) tr.gone = t;
+    st.count = d.ac.length; st.source = d.source || ''; st.licence = d.licence || ''; st.updated = recv;
+    lastGood = recv;
+  }
+
   async function poll() {
     timer = 0;
     if (!wanted) return;
-    if (document.hidden) { schedule(POLL_MS); return; }
+    if (document.hidden) return; // resumed by visibilitychange
     if (busy) return;
     busy = true;
     if (st.state === 'idle') st.state = 'connecting';
@@ -89,45 +110,66 @@ export function createLiveFeed(app, { url = '/api/flights' } = {}) {
       else {
         const d = await res.json();
         if (!d || !Array.isArray(d.ac)) throw new Error('bad payload');
-        ingest(d);
+        const age = Math.min(120, Math.max(0, +res.headers.get('age') || 0));
+        ingest(d, age);
         st.state = 'live'; st.error = ''; fails = 0;
       }
     } catch (e) {
       fails++;
       st.error = String((e && e.message) || e);
-      if (Date.now() / 1000 - lastGood > STALE_S) st.state = 'unavailable';
+      if (Date.now() / 1000 - lastGood > staleS()) st.state = 'unavailable';
     } finally { busy = false; }
-    // back off on errors; a missing relay (static hosting) is re-checked only every 5 minutes
-    schedule(!fails ? POLL_MS : st.error === 'no relay' ? 300000 : Math.min(60000, POLL_MS * 2 ** fails));
+    interval = Date.now() - lastInput > IDLE_AFTER_MS ? POLL_IDLE_MS : POLL_ACTIVE_MS;
+    // back off on errors; a missing relay (static hosting) is re-checked only every 10 minutes
+    schedule(!fails ? interval : st.error === 'no relay' ? 600000 : Math.min(300000, interval * 2 ** fails));
   }
   function schedule(ms) { if (wanted && !timer) timer = setTimeout(poll, ms); }
-  const onVis = () => { if (!document.hidden && wanted && st.state === 'live') { clearTimeout(timer); timer = 0; poll(); } };
-  document.addEventListener('visibilitychange', onVis);
+  function kick() { if (!wanted || busy) return; clearTimeout(timer); timer = 0; poll(); }
+
+  document.addEventListener('visibilitychange', () => {
+    // coming back after a while: fetch right away (the old snapshot is stale)
+    if (!document.hidden && wanted && Date.now() / 1000 - st.updated > interval / 1000) kick();
+  });
+  const onInput = () => {
+    const wasIdle = interval === POLL_IDLE_MS;
+    lastInput = Date.now();
+    if (wasIdle && wanted && st.state === 'live') { interval = POLL_ACTIVE_MS; if (Date.now() / 1000 - st.updated > POLL_ACTIVE_MS / 1000) kick(); }
+  };
+  for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) window.addEventListener(ev, onInput, { passive: true });
 
   const feed = {
     status: st,
     /** true while the feed is delivering fresh data */
-    get live() { return st.state === 'live' && Date.now() / 1000 - lastGood < STALE_S; },
+    get live() { return st.state === 'live' && Date.now() / 1000 - lastGood < staleS(); },
+    get pollMs() { return interval; },
     start() { if (wanted) return; wanted = true; clearTimeout(timer); timer = 0; poll(); },
     stop() { wanted = false; clearTimeout(timer); timer = 0; if (st.state !== 'unavailable') st.state = 'idle'; },
+    /** Latest known data for one aircraft (for the info card), or null if it is gone. */
+    info(id) {
+      const tr = tracks.get(id);
+      if (!tr) return null;
+      const t = nowS();
+      predict(tr, t, tmp);
+      return { id: tr.id, cs: tr.cs, type: tr.t, cat: tr.cat, alt: Math.round(tmp.z), gs: tr.gs, trk: ((tmp.th / DEG) % 360 + 360) % 360,
+        vr: tr.vr, gnd: tr.gnd, fixAge: Math.max(0, t - tr.tf), lost: !!tr.gone, source: st.source, licence: st.licence };
+    },
     /**
      * Calls fn(track, x, y, z, alpha) for every displayable aircraft (world tiles, metres). The eased heading is kept
      * on track.hdg (radians, atan2 in world x/y). dt = seconds since the previous call, used for heading easing.
      */
     each(fn, dt) {
-      const t = nowS(), pos = tmp;
+      const t = nowS(), pos = tmp, gS = goneS(), dS = dropS();
       for (const tr of tracks.values()) {
         const since = t - tr.tf;
-        if (since > DROP_S || (tr.gone && t - tr.gone > GONE_S)) { tracks.delete(tr.id); continue; }
+        if (since > dS || (tr.gone && t - tr.gone > gS)) { tracks.delete(tr.id); continue; }
         display(tr, t, pos);
-        // heading: velocity direction while moving, else last track; eased so turns between fixes are smooth
-        const sp = Math.hypot(tr.vx, tr.vy);
-        const target = sp > 0.02 ? Math.atan2(tr.vy, tr.vx) : tr.trk != null ? Math.atan2(-Math.cos(tr.trk * Math.PI / 180), Math.sin(tr.trk * Math.PI / 180)) : tr.hdg ?? 0;
+        // heading: predicted track angle (clockwise from north) → world atan2; eased so corrections never snap
+        const target = Math.atan2(-Math.cos(pos.th), Math.sin(pos.th));
         if (tr.hdg == null) tr.hdg = target;
-        else { let dh = target - tr.hdg; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); tr.hdg += dh * Math.min(1, dt * 1.8); }
+        else { let dh = target - tr.hdg; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); tr.hdg += dh * Math.min(1, dt * 2.5); }
         let a = Math.min(1, (t - tr.born) / FADE_S);
-        if (tr.gone) a = Math.min(a, (GONE_S - (t - tr.gone)) / FADE_S);
-        if (since > DROP_S - 10) a = Math.min(a, (DROP_S - since) / 10);
+        if (tr.gone) a = Math.min(a, (gS - (t - tr.gone)) / FADE_S);
+        if (since > dS - 10) a = Math.min(a, (dS - since) / 10);
         if (a > 0.01) fn(tr, pos.x, pos.y, pos.z, a);
       }
     },

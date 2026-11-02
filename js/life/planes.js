@@ -119,7 +119,7 @@ export function createPlanes(app) {
   for (const s of streams) s.dur = Math.max(...s.trajs.map((t) => t.dur));
 
   const pool = [];
-  const newP = () => ({ x: 0, y: 0, z: 0, ux: 1, uy: 0, alpha: 1, type: TYPES[0], tail: '#fff', seed: 0, ll: 0, on: false, cs: '', id: '' });
+  const newP = () => ({ x: 0, y: 0, z: 0, ux: 1, uy: 0, alpha: 1, type: TYPES[0], tail: '#fff', seed: 0, ll: 0, on: false, cs: '', id: '', sx: -1e9, sy: -1e9, spx: 0, frame: -1 });
   for (let i = 0; i < 40; i++) pool.push(newP());
   const active = [];
   let enabled = true;
@@ -231,7 +231,10 @@ export function createPlanes(app) {
     if (fill) { c.fillStyle = fill; c.fill(); }
   }
 
+  let frameNo = 0, selectedId = '';
   function drawPlanes(r) {
+    const main = r.ctx === app.ctx;
+    if (main) frameNo++;
     if (!enabled || !active.length) return;
     const c = r.ctx, L = r.L, night = r.night, T = app.clock.t + T0;
     const sp = glowSprite('#ffffff', 0.15), red = glowSprite('#ff2a20', 0.2), grn = glowSprite('#2aff6a', 0.2), warm = glowSprite('#fff1cc', 0.12);
@@ -239,8 +242,10 @@ export function createPlanes(app) {
       const X = r.ox + (p.x - p.y) * r.kx, Y = r.oy + (p.x + p.y) * r.ky - p.z * r.kz;
       const ext = p.type.S * SIZE * 0.012 * r.kx + 30;
       if (X < -ext || X > r.vw + ext || Y < -ext || Y > r.vh + ext) continue;
-      c.globalAlpha = p.alpha;
       const sizePx = p.type.L * SIZE / 100 * r.kx;
+      if (main) { p.sx = X; p.sy = Y; p.spx = sizePx; p.frame = frameNo; } // hit-testing (on-screen view only)
+      if (main && p.id && p.id === selectedId) ring(c, X, Y, Math.max(11, sizePx * 0.75), T, night);
+      c.globalAlpha = p.alpha;
       if (sizePx < 2.5) {
         // dot LOD
         c.fillStyle = L.shade('#f4f6f8', 0, 0, 1);
@@ -282,6 +287,17 @@ export function createPlanes(app) {
       if (p.cs && sizePx > 7) label(c, p.cs, X, Y - Math.max(8, sizePx * 0.55) - 4, p.alpha, night);
     }
   }
+  function ring(c, X, Y, rad, T, night) {
+    const pulse = 0.5 + 0.5 * Math.sin(T * 4);
+    c.save();
+    c.globalAlpha = 0.9;
+    c.lineWidth = 2;
+    c.strokeStyle = night > 0.5 ? '#ffd27a' : '#c98a1a';
+    c.beginPath(); c.arc(X, Y, rad, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.35 * (1 - pulse);
+    c.beginPath(); c.arc(X, Y, rad + 4 + pulse * 8, 0, Math.PI * 2); c.stroke();
+    c.restore();
+  }
   function label(c, text, X, Y, a, night) {
     c.globalAlpha = a * 0.92;
     c.font = '600 10.5px Inter, system-ui, sans-serif';
@@ -322,6 +338,19 @@ export function createPlanes(app) {
   app.scene.overlays.push(drawPlanes);
   return {
     update, stats, active, feed,
+    /** Live aircraft under screen point (sx, sy) in the last frame, or null. */
+    pickAt(sx, sy) {
+      let best = null, bd = Infinity;
+      for (const p of active) {
+        if (!p.id || p.frame !== frameNo || p.alpha < 0.3) continue;
+        const d = Math.hypot(p.sx - sx, p.sy - sy), R = Math.max(14, p.spx * 0.7);
+        if (d < R && d < bd) { bd = d; best = p; }
+      }
+      return best ? { id: best.id, cs: best.cs, x: best.x, y: best.y, z: best.z } : null;
+    },
+    /** Where aircraft `id` is right now ({x, y, z} with display z), or null. */
+    where(id) { for (const p of active) if (p.id === id) return { x: p.x, y: p.y, z: p.z }; return null; },
+    setSelected(id) { selectedId = id || ''; },
     setEnabled(v) { enabled = !!v; if (!enabled) { active.length = 0; feed.stop(); } else feed.start(); }, get enabled() { return enabled; },
   };
 }

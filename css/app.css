@@ -210,6 +210,18 @@ html[dir='rtl'] .card-alt { text-align: right; }
   background: rgba(255, 236, 200, .07); font-size: 12px; }
 .line-chip::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 .card-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+a.btn { text-decoration: none; color: inherit; }
+.btn[disabled] { opacity: .45; cursor: default; }
+/* live flight card */
+.cat-flight { --c: #8fd3ff; }
+.card-cat .live-dot { display: inline-block; margin-inline-start: 2px; }
+.card-flight-sub { font-family: var(--f-ui); font-size: 14px; }
+html[lang='ar'] .card-flight-sub { font-family: var(--f-ar); }
+.card-stats { margin: 14px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.card-stats div { min-width: 0; }
+.card-stats dt { font-size: 11.5px; color: var(--dune); }
+.card-stats dd { margin: 2px 0 0; font-size: 14px; color: var(--ivory); font-variant-numeric: tabular-nums; }
+.card-note { margin: 12px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dune-dim); }
 
 /* ---------- time of day ---------- */
 .time {

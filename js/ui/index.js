@@ -178,10 +178,34 @@ export function initUI(app) {
   app.on('click', (e) => {
     if (ui.touring) return;
     ui.closePopovers();
+    // planes fly above everything, so they win the hit test
+    const fl = e && lifeOk() ? app.life.pickFlight?.(e.sx, e.sy) : null;
+    if (fl) { ui.card.showFlight(fl.id); return; }
     const p = e && e.obj && e.obj.pick;
     if (p) app.select(p);
+    else if (ui.card.flightId) ui.card.closeFlight();
     else if (app.selected) app.select(null);
   });
+
+  // ---- follow a live flight (camera keeps the aircraft centred; any drag or arrow key stops it) ---
+  ui.followFlight = null;
+  app.on('tick', (dt) => {
+    const id = ui.followFlight;
+    if (!id || app.flight || ui.touring) return;
+    const w = app.life?.flightWhere?.(id);
+    if (!w) return;
+    // the ground point that projects to the aircraft's drawn position (it is drawn z metres up the screen)
+    const off = (w.z * 0.392) / 32;
+    const tx = w.x - off, ty = w.y - off, c = app.camera, k = 1 - Math.exp(-Math.min(dt, 0.2) * 3);
+    app.setCamera(c.x + (tx - c.x) * k, c.y + (ty - c.y) * k, c.zoom);
+  });
+  let dragFrom = null;
+  app.canvas.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
+  app.canvas.addEventListener('pointermove', (e) => {
+    if (!dragFrom || !e.buttons || !ui.followFlight) return;
+    if (Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 6) ui.card.setFollow(false);
+  });
+  window.addEventListener('pointerup', () => { dragFrom = null; });
   const tip = $('#tip');
   let lastHover = 0, hoverObj = null, pendingHover = null;
   app.on('hover', (h) => { pendingHover = h; });
@@ -192,11 +216,12 @@ export function initUI(app) {
     lastHover = now;
     const { x, y } = pendingHover;
     pendingHover = null;
+    const fl = lifeOk() ? app.life.pickFlight?.(x, y) : null;
     let o = null;
-    try { o = app.pickAt(x, y); } catch { o = null; }
-    const p = o && o.pick;
+    if (!fl) { try { o = app.pickAt(x, y); } catch { o = null; } }
+    const p = fl ? { name: fl.cs || t('flight'), id: 'flight:' + fl.id } : o && o.pick;
     if (p && p.name) {
-      if (hoverObj !== p) { tip.textContent = pick(p.name, lang()); hoverObj = p; }
+      if (hoverObj?.id !== p.id || hoverObj?.name !== p.name) { tip.textContent = pick(p.name, lang()); hoverObj = p; }
       const rtl = document.documentElement.dir === 'rtl';
       tip.style.transform = `translate(${Math.round(rtl ? x - 14 - tip.offsetWidth : x + 14)}px, ${Math.round(y + 16)}px)`;
       tip.classList.add('show');
@@ -239,6 +264,7 @@ export function initUI(app) {
       const anyPop = !$('#save-panel').hidden || !$('#layers-panel').hidden || $('#tools').classList.contains('open');
       if (anyPop) { ui.closePopovers(); return; }
       if (ui.tour.isActive()) { ui.tour.stop(); return; }
+      if (ui.card.flightId) { ui.card.closeFlight(); return; }
       if (app.selected) { app.select(null); return; }
       return;
     }
@@ -249,6 +275,7 @@ export function initUI(app) {
     else if (e.key === '[' || e.key === ']') { ui.cancelTimeAnim?.(); app.setHours(app.clock.hours + (e.key === ']' ? 0.5 : -0.5), 'manual'); }
     else if ((e.key === 'r' || e.key === 'R') && !e.target.closest('button')) { ui.cancelMotion(); ui.resetView(); }
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '+', '-', '='].includes(e.key) && !e.target.closest('#ui button, #track')) ui.userMoved = true;
+    if (e.key.startsWith('Arrow') && ui.followFlight) ui.card.setFollow(false);
   });
 
   // ---- modules -------------------------------------------------------------------------------

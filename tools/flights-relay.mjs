@@ -17,7 +17,7 @@ const PROVIDERS = [
   { name: 'adsb.lol', url: `https://api.adsb.lol/v2/point/${LAT}/${LON}/${RADIUS_NM}`, licence: 'ODbL' },
   { name: 'adsb.fi', url: `https://opendata.adsb.fi/api/v2/lat/${LAT}/lon/${LON}/dist/${RADIUS_NM}`, licence: 'adsb.fi open data' },
 ];
-const CACHE_MS = 5000;           // serve the same snapshot to everyone for this long
+const CACHE_MS = 10000;          // serve the same snapshot to everyone for this long (matches the CDN max-age)
 const TIMEOUT_MS = 8000;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_AIRCRAFT = 300;
@@ -41,6 +41,7 @@ function normalise(a) {
   if (altFt === null) return null;
   const gs = num(a.gs, 0, 1000), trk = num(a.track, 0, 360) ?? num(a.true_heading, 0, 360);
   const vr = num(a.geom_rate, -20000, 20000) ?? num(a.baro_rate, -20000, 20000) ?? 0;
+  const rate = gnd ? null : num(a.track_rate, -10, 10);
   return {
     id: str(a.hex, /^~?[0-9a-f]{6}$/i).toLowerCase(),
     cs: str(a.flight, /^[A-Z0-9 -]{1,10}$/i).toUpperCase(),
@@ -52,6 +53,7 @@ function normalise(a) {
     gs: gs === null ? 0 : +(gs * KT).toFixed(1),  // m/s
     trk: trk === null ? null : +trk.toFixed(1),   // degrees true, clockwise from north
     vr: gnd ? 0 : +((vr * FT) / 60).toFixed(2),   // m/s, + = climbing
+    ...(rate === null ? {} : { tr: +rate.toFixed(2) }), // turn rate, deg/s (+ = right), when the feed has it
     age: +age.toFixed(1),                          // seconds between the position fix and `now`
   };
 }
@@ -102,7 +104,7 @@ export function handleFlights(req, res, opts = {}) {
   const path = new URL(req.url, 'http://x').pathname;
   if (path !== '/api/flights') return false;
   const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
-  const okHeaders = opts.cdn ? { ...headers, 'vercel-cdn-cache-control': 'max-age=4, stale-while-revalidate=10' } : headers;
+  const okHeaders = opts.cdn ? { ...headers, 'vercel-cdn-cache-control': 'max-age=10, stale-while-revalidate=20' } : headers;
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...headers, allow: 'GET, HEAD' }); res.end('{"error":"method not allowed"}'); return true; }
   snapshot().then(
     (body) => { res.writeHead(200, okHeaders); res.end(req.method === 'HEAD' ? undefined : body); },

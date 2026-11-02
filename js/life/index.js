@@ -87,6 +87,14 @@ export function createLife(app) {
     },
     metroPaths: mods.metro?.paths ?? [],
     /** Live flight feed status: { state: 'idle'|'connecting'|'live'|'unavailable', count, source, licence, updated } */
+    /** Live aircraft under a screen point → { id, cs, x, y, z } or null. */
+    pickFlight(sx, sy) { return mods.planes?.enabled ? mods.planes.pickAt(sx, sy) : null; },
+    /** Current data for a live aircraft (callsign, type, altitude m, speed m/s, track °, vertical rate m/s…) or null. */
+    flightInfo(id) { return mods.planes?.feed?.info(id) ?? null; },
+    /** Current drawn position of a live aircraft ({ x, y, z } world tiles + display metres) or null. */
+    flightWhere(id) { return mods.planes?.where(id) ?? null; },
+    /** Highlight one aircraft (or none). */
+    selectFlight(id) { mods.planes?.setSelected(id); },
     get flights() { const f = mods.planes?.feed; return f ? { ...f.status, live: f.live } : null; },
   };
   return life;

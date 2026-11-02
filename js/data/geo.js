@@ -86,7 +86,9 @@ export const ROADS = [
   { id: 'al-khaleej', name: { en: 'Al Khaleej Road', ar: 'شارع الخليج' }, kind: 'major', width: 30, pts: [
     [25.262, 55.285], [25.27, 55.293], [25.278, 55.303], [25.284, 55.318], [25.289, 55.333], [25.296, 55.35]] },
   { id: 'garhoud', name: { en: 'Al Garhoud Bridge & Airport Road', ar: 'جسر القرهود وشارع المطار' }, kind: 'major', width: 40, pts: [
-    [25.228, 55.297], [25.232, 55.312], [25.238, 55.328], [25.243, 55.343], [25.248, 55.357], [25.252, 55.372]] },
+    [25.228, 55.297], [25.232, 55.312], [25.238, 55.328], [25.243, 55.343],
+    // follows the airport's south-west perimeter towards Al Rashidiya (it never crosses the runways)
+    [25.2442, 55.353], [25.2375, 55.3666], [25.2319, 55.3783], [25.227, 55.3905]] },
   { id: 'maktoum-bridge', name: { en: 'Al Maktoum Bridge', ar: 'جسر آل مكتوم' }, kind: 'major', width: 35, pts: [
     [25.236, 55.296], [25.243, 55.305], [25.249, 55.313], [25.256, 55.322], [25.264, 55.332]] },
   { id: 'ittihad', name: { en: 'Al Ittihad Road', ar: 'شارع الاتحاد' }, kind: 'highway', width: 55, pts: [
