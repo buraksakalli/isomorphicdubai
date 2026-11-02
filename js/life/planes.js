@@ -2,7 +2,10 @@
 // departures from 12R (line-up, take-off roll, climb-out and turn), plus a few at DWC.
 // Trajectories are precomputed once at 0.5 s resolution; each frame just interpolates. Planes are overlays drawn
 // at their real altitude; their sun shadows are an underlay. Nav lights (red/green/white strobe/beacon) at night.
+// LIVE: when the flight relay (/api/flights) answers, real ADS-B traffic replaces the simulation (see live.js);
+// if it is missing or goes stale, the simulation resumes automatically.
 import { RUNWAYS } from '../data/geo.js';
+import { createLiveFeed } from './live.js';
 import { hash } from '../core/shapes.js';
 import { bezier, densify, clamp, smooth, glowSprite } from './util.js';
 
@@ -16,6 +19,20 @@ const TYPES = [               // length, span (m), engines, weight
 ];
 const TAILS = ['#c8102e', '#1f4e9c', '#c9a227', '#0b6e4f', '#5b2c83', '#e0e3e6', '#d4572a', '#16324f'];
 const SIZE = 1.5; // slight exaggeration for legibility at city zooms
+
+// Live traffic: ICAO type designator → silhouette (index into TYPES); unknown → by ADS-B emitter category.
+const TYPE_OF = (t, cat) => {
+  if (t === 'A388') return 0;
+  if (/^(B74|B77|A34|A35K)/.test(t)) return 1;
+  if (/^(B78|B76|A33|A35|A30|A31|MD11|IL96)/.test(t)) return 2;
+  if (t) return 3;
+  return cat === 'A5' ? 1 : 3;
+};
+// a few well-known local operators by ICAO callsign prefix; everyone else gets a stable colour from the prefix
+const OPERATOR_TAIL = { UAE: '#c8102e', FDB: '#1f6fb5', ETD: '#c9a227', ABY: '#d22630' };
+// Cruise altitudes (~11 km) would push planes far from their ground track in this projection, so altitude above
+// 2 km is compressed for display (11 km → ~5.2 km, the simulation's ceiling). Shadows use the same value.
+const DISPLAY_Z = (z) => (z <= 2000 ? z : 2000 + (z - 2000) * 0.35);
 
 export function createPlanes(app) {
   const g = app.geo;
@@ -102,15 +119,45 @@ export function createPlanes(app) {
   for (const s of streams) s.dur = Math.max(...s.trajs.map((t) => t.dur));
 
   const pool = [];
-  for (let i = 0; i < 40; i++) pool.push({ x: 0, y: 0, z: 0, ux: 1, uy: 0, alpha: 1, type: TYPES[0], tail: '#fff', seed: 0, ll: 0, on: false });
+  const newP = () => ({ x: 0, y: 0, z: 0, ux: 1, uy: 0, alpha: 1, type: TYPES[0], tail: '#fff', seed: 0, ll: 0, on: false, cs: '', id: '' });
+  for (let i = 0; i < 40; i++) pool.push(newP());
   const active = [];
   let enabled = true;
   const T0 = 50000;
-  const stats = { planes: 0 };
+  const stats = { planes: 0, source: 'sim' };
+
+  const feed = createLiveFeed(app);
+  feed.start();
+  let lastWall = performance.now();
+  function updateLive(dt) {
+    let pi = 0;
+    feed.each((tr, x, y, z, a) => {
+      if (pi >= pool.length) { if (pool.length >= 200) return; pool.push(newP()); }
+      const p = pool[pi++];
+      p.x = x; p.y = y; p.z = DISPLAY_Z(z);
+      p.ux = Math.cos(tr.hdg); p.uy = Math.sin(tr.hdg);
+      p.alpha = a;
+      p.type = TYPES[TYPE_OF(tr.t, tr.cat)];
+      const pre = /^[A-Z]{3}\d/.test(tr.cs) ? tr.cs.slice(0, 3) : '';
+      p.tail = OPERATOR_TAIL[pre] || TAILS[Math.floor(hash(pre ? pre.charCodeAt(0) * 31 + pre.charCodeAt(1) * 7 + pre.charCodeAt(2) : parseInt(tr.id.slice(-4), 16) || 0, 11, 5) * TAILS.length)];
+      p.seed = (parseInt(tr.id.slice(-3), 16) || 0) % 10;
+      p.ll = z < 1500 && (!tr.gnd || tr.gs > 25) ? 1 : 0;   // landing/taxi lights low down, or on the take-off roll
+      p.cs = tr.cs; p.id = tr.id;
+      active.push(p);
+    }, dt);
+  }
 
   function update() {
     active.length = 0;
+    const now = performance.now(), wdt = Math.min(1, (now - lastWall) / 1000); lastWall = now;
     if (!enabled) { stats.planes = 0; return; }
+    if (feed.live) {
+      stats.source = 'live';
+      updateLive(wdt);
+      sortActive();
+      return;
+    }
+    stats.source = 'sim';
     const T = app.clock.t + T0;
     let pi = 0;
     for (const st of streams) {
@@ -130,10 +177,13 @@ export function createPlanes(app) {
         let acc = hh * 11, ti = 0; while (ti < TYPES.length - 1 && acc > TYPES[ti].w) { acc -= TYPES[ti].w; ti++; }
         p.type = st.id >= 3 && ti === 0 ? TYPES[1] : TYPES[ti];
         p.tail = TAILS[Math.floor(hash(k, st.id, 5) * TAILS.length)];
-        p.seed = hash(k, st.id, 7) * 10; p.ll = tr.ll[i];
+        p.seed = hash(k, st.id, 7) * 10; p.ll = tr.ll[i]; p.cs = ''; p.id = '';
         active.push(p);
       }
     }
+    sortActive();
+  }
+  function sortActive() {
     // far (small x+y) first
     for (let i = 1; i < active.length; i++) { const p = active[i]; let j = i - 1; while (j >= 0 && active[j].x + active[j].y > p.x + p.y) { active[j + 1] = active[j]; j--; } active[j + 1] = p; }
     stats.planes = active.length;
@@ -229,7 +279,18 @@ export function createPlanes(app) {
       if (p.ll && p.z < 1500) { P(0.3 * Lm, 0, 0); blit(c, warm, Q[0], Q[1], gs * (2.5 + 3 * night), (0.35 + 0.65 * night) * p.alpha); }
       c.globalCompositeOperation = 'source-over';
       c.globalAlpha = 1;
+      if (p.cs && sizePx > 7) label(c, p.cs, X, Y - Math.max(8, sizePx * 0.55) - 4, p.alpha, night);
     }
+  }
+  function label(c, text, X, Y, a, night) {
+    c.globalAlpha = a * 0.92;
+    c.font = '600 10.5px Inter, system-ui, sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.lineJoin = 'round'; c.lineWidth = 3;
+    c.strokeStyle = night > 0.5 ? 'rgba(8,16,30,.85)' : 'rgba(255,250,240,.85)';
+    c.fillStyle = night > 0.5 ? '#f3e7cf' : '#1f2a36';
+    c.strokeText(text, X, Y); c.fillText(text, X, Y);
+    c.globalAlpha = 1;
   }
   function blit(c, spr, X, Y, rad, a) {
     if (a <= 0.01) return;
@@ -260,7 +321,7 @@ export function createPlanes(app) {
   app.scene.underlays.push(drawShadows);
   app.scene.overlays.push(drawPlanes);
   return {
-    update, stats, active,
-    setEnabled(v) { enabled = !!v; if (!enabled) active.length = 0; }, get enabled() { return enabled; },
+    update, stats, active, feed,
+    setEnabled(v) { enabled = !!v; if (!enabled) { active.length = 0; feed.stop(); } else feed.start(); }, get enabled() { return enabled; },
   };
 }

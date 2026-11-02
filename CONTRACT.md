@@ -3,6 +3,8 @@
 An interactive, **fully code-rendered** isometric illustration of Dubai (inspired by isometricistanbul.com, but
 live: day/night lighting, sun shadows, traffic, metro, boats, planes, search, tours, EN/AR). Zero dependencies,
 zero build step, plain ES modules + Canvas 2D. No analytics, no trackers, no external requests except Google Fonts.
+One exception by design: `js/life/live.js` polls the same-origin `/api/flights` relay (`tools/flights-relay.mjs`) for
+real-time aircraft; everything must keep working (simulated planes) when that endpoint is missing.
 
 ## Run & verify
 ```
@@ -81,4 +83,4 @@ API: `app.flyTo(x,y,zoom,dur?)`, `app.setCamera(x,y,zoom)`, `app.zoomAt(f,sx,sy)
 - Accuracy: geography is approximate but must be **recognisable** (coast shape, Palm, World, Creek, SZR skyline spine).
   Facts/blurbs: only well-established facts; no invented numbers; omit anything uncertain.
 - Performance: target ≤ ~25k static scene objects total. Merge tiny things (villas, trees) into cluster objects.
-- No `eval`, no network calls, no storage of personal data. `localStorage` only for UI prefs (wrapped in try/catch).
+- No `eval`, no network calls (other than the same-origin flight relay above), no storage of personal data. `localStorage` only for UI prefs (wrapped in try/catch).

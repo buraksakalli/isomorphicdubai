@@ -12,6 +12,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { handleFlights } from './flights-relay.mjs';
 
 const DBG = (...a) => process.env.SHOT_DEBUG && console.error('[shot]', ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,6 +30,7 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer((req, res) => {
+  if (!args.nolive && handleFlights(req, res)) return;
   const u = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   let f = path.join(ROOT, u === '/' ? 'index.html' : u);
   if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('nf'); }

@@ -2,7 +2,8 @@
 //   traffic  – lane-based cars/taxis/buses/trucks on ROADS (underlay; light streams at low zoom / night)
 //   metro    – Red & Green line viaducts + stations (static) and 5-car trains (dynamic objects)
 //   boats    – abras, moored + cruising dhows, yachts, ships, wakes and sea glints
-//   planes   – DXB / DWC arrivals & departures at real altitude (overlay) with ground shadows
+//   planes   – real-time ADS-B traffic via the /api/flights relay when available, else simulated DXB / DWC
+//              arrivals & departures; drawn at (compressed) altitude as an overlay with ground shadows
 //   clouds   – drifting puffs + shadows; fireworks (life.fireworks(x, y); auto at 00:00–00:05)
 import { createTraffic } from './traffic.js';
 import { createMetro } from './metro.js';
@@ -78,13 +79,15 @@ export function createLife(app) {
         trafficDensity: +(mods.traffic?.stats.density ?? 0).toFixed(2),
         trains: mods.metro?.stats.trains ?? 0, metroCars: mods.metro?.stats.cars ?? 0,
         boats: mods.boats?.stats.boats ?? 0, ships: mods.boats?.stats.ships ?? 0,
-        planes: mods.planes?.stats.planes ?? 0, clouds: mods.sky?.stats.clouds ?? 0, particles: mods.sky?.stats.particles ?? 0,
+        planes: mods.planes?.stats.planes ?? 0, planesSource: mods.planes?.stats.source ?? 'sim', clouds: mods.sky?.stats.clouds ?? 0, particles: mods.sky?.stats.particles ?? 0,
         statics: (mods.metro?.stats.statics ?? 0) + (mods.boats?.stats.statics ?? 0),
         // previous frame's cost of life's own passes (dynamic trains/boats draw inside the object pass, not counted)
         ms: { update: +ms.update.toFixed(2), underlays: +last.under.toFixed(2), overlays: +last.over.toFixed(2) },
       };
     },
     metroPaths: mods.metro?.paths ?? [],
+    /** Live flight feed status: { state: 'idle'|'connecting'|'live'|'unavailable', count, source, licence, updated } */
+    get flights() { const f = mods.planes?.feed; return f ? { ...f.status, live: f.live } : null; },
   };
   return life;
 }

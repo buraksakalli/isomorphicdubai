@@ -80,7 +80,7 @@ export function initUI(app) {
     const rows = [['labels', ui.prefs.labels, true]].concat(LIFE_KINDS.map((k) => [k, ui.prefs.layers[k] !== false, lifeOk()]));
     list.innerHTML = rows.map(([k, on, ok]) => `
       <label class="switch-row${ok ? '' : ' is-off'}">
-        <span class="switch-text">${esc(t(k))}${ok ? '' : `<small>${esc(t('unavailable'))}</small>`}</span>
+        <span class="switch-text">${esc(t(k))}${ok ? '' : `<small>${esc(t('unavailable'))}</small>`}${k === 'planes' && ok ? '<small id="flights-status"></small><small id="flights-credit" hidden></small>' : ''}</span>
         <input type="checkbox" role="switch" data-layer="${k}" ${on ? 'checked' : ''} ${ok ? '' : 'disabled'}>
         <span class="switch" aria-hidden="true"></span>
       </label>`).join('');
@@ -94,6 +94,20 @@ export function initUI(app) {
     ui.persist();
   });
   for (const k of LIFE_KINDS) if (ui.prefs.layers[k] === false) setLife(k, false);
+
+  // live flight status line under "Planes" (text only, set via textContent)
+  let flAcc = 1;
+  const renderFlights = () => {
+    const el = $('#flights-status'), cr = $('#flights-credit');
+    const f = lifeOk() ? app.life.flights : null;
+    if (!el || !f) return;
+    const on = ui.prefs.layers.planes !== false;
+    el.textContent = !on ? '' : f.live ? t('flightsLive').replace('{n}', String(app.life.stats.planes)) : f.state === 'connecting' ? t('flightsConnecting') : t('flightsSim');
+    el.hidden = !on;
+    if (cr) { cr.hidden = !(on && f.live && f.source); cr.textContent = f.source ? t('flightsCredit').replace('{src}', f.source + (f.licence ? ` (${f.licence})` : '')) : ''; }
+  };
+  app.on('tick', (dt) => { flAcc += dt; if (flAcc < 1) return; flAcc = 0; if (!$('#layers-panel')?.hidden) renderFlights(); });
+  $('#layers-btn')?.addEventListener('click', () => setTimeout(renderFlights, 0));
 
   // ---- popovers & menu ------------------------------------------------------------------------
   const pops = { save: ['#save-btn', '#save-panel'], layers: ['#layers-btn', '#layers-panel'], menu: ['#menu-btn', '#tools'] };
